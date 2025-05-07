@@ -4,60 +4,60 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <sixel.h>
+#include "base64.h"
 
-
-char* getUser() {
-  char* username = getenv("USER");
+/* Gets the username by the USER environment variable */
+char* getUser(void) {
+  char* environmentVariable = getenv("USER");
+  if (environmentVariable == NULL) {
+    return NULL;
+  }
+  
+  const size_t size = strnlen(environmentVariable, 128);
+  char* username = (char*)calloc(size + 1, sizeof(char));
   if (username == NULL) {
     return NULL;
   }
 
+  strncpy(username, environmentVariable, size);
   return username;
 }
 
-
-char* getOS() {
+/* Gets the Operating System (Linux Distribution) in use by reading the /etc/os-release file */
+char* getOS(void) {
   FILE *fp;
-  char operatingSystem[256] = { 0 };
+  char buffer[256] = { 0 };
 
   int length = 0;
 
-  const int strSize = 128;
-  char* str = (char*)calloc(strSize + 1, 1);
+  const int operatingSystemSize = 128;
+  char* operatingSystem = (char*)calloc(operatingSystemSize + 1, 1);
 
-  if (str == NULL) {
+  if (operatingSystem == NULL) {
+    return NULL;
+  }
+
+  const char path[] = "/etc/os-release";
+  fp = fopen(path, "r");
+
+  if (fp == NULL) {
+    free(operatingSystem);
     return NULL;
   }
   
-  fp = popen("cat /etc/os-release | grep -i \"PRETTY_NAME\"", "r");
-
-  if (fgets(operatingSystem, sizeof(operatingSystem), fp) == NULL) {
-    return NULL;
-  };
-
-  pclose(fp);
-
-  bool isQuoted = false;
+  while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+    sscanf(buffer, "PRETTY_NAME=\"%[^\"]\"", operatingSystem);
+  }
   
-  for (int i = 0; operatingSystem[i] != 0; i++) {
-    if (length > strSize) {
-      break;
-    }
+  fclose(fp);
 
-    if (operatingSystem[i] == '"') {
-      isQuoted = !isQuoted;
-    } else if (isQuoted == true) {
-      str[length++] = operatingSystem[i];
-    }
-  };
-
-  return str; 
+  return operatingSystem; 
 }
 
-char* getShell() {
+/* Gets the current shell that was used by reading from /proc/$$/cmdline */
+char* getShell(void) {
   FILE *fp;
-  char path[128];
+  char path[128] = { 0 };
   char buffer[128] = { 0 };
 
   snprintf(path, sizeof(path), "/proc/%d/cmdline", getppid());
@@ -69,7 +69,8 @@ char* getShell() {
   }
   
   if (fgets(buffer, sizeof(buffer), fp) == NULL) {
-   return NULL; 
+    fclose(fp);
+    return NULL; 
   }
 
   fclose(fp);
@@ -79,43 +80,57 @@ char* getShell() {
   if (shell == NULL) {
     return NULL;
   }
-
-  strncpy(shell, (strrchr(buffer, '/') + 1), 127);
   
+  if (strrchr(buffer, '/') != NULL) {
+    strncpy(shell, (strrchr(buffer, '/') + 1), 127);
+  }
   return shell;
 }
 
-char* getDesktop() {
-  char* desktop = (char*)calloc(128, 1);
+/* Gets the Linux Desktop Environment by the XDG_CURRENT_DESKTOP environment variable */
+char* getDesktop(void) {
+  char* environmentVariable = getenv("XDG_CURRENT_DESKTOP");
+  if (environmentVariable == NULL) {
+    return NULL;
+  }
+  
+  const size_t size = strnlen(environmentVariable, 128);
+  char* desktop = (char*)calloc(size + 1, sizeof(char));
   if (desktop == NULL) {
     return NULL;
   }
-  
-  strcpy(desktop, getenv("XDG_CURRENT_DESKTOP"));
 
+  strncpy(desktop, environmentVariable, size);
   return desktop;
 }
 
-char* getTerminal() {
-  char* terminal = (char*)calloc(128, 1);
-  if (terminal ==  NULL) {
-    return NULL;
-  }
-
-  if (getenv("TERM") != NULL) {
-    strncpy(terminal, getenv("TERM"), 128);
-  } else {
+/* Gets the Terminal Emulator by the TERM environment variable */
+char* getTerminal(void) {
+  char* environmentVariable = getenv("TERM");
+  if (environmentVariable == NULL) {
     return NULL;
   }
   
+  const size_t size = strnlen(environmentVariable, 128);
+  char* terminal = (char*)calloc(size + 1, sizeof(char));
+  if (terminal == NULL) {
+    return NULL;
+  }
+
+  strncpy(terminal, environmentVariable, size);
   return terminal;
 }
 
-double getTotalMemory() {
+/* Gets the total memory available on the system by reading the first line from /proc/meminfo and parsing it accordingly */
+/* TODO: Return to this to make it more efficient */
+double getTotalMemory(void) {
   FILE* fp;
   const char* path = "/proc/meminfo";
   fp = fopen(path, "r");
-
+  if (fp == NULL) {
+    return -1;
+  }
+  
   const size_t BUFFER_SIZE = 128;
   char buffer[128] = { 0 };
   if (fgets(buffer, sizeof(buffer), fp) == NULL) {
@@ -143,17 +158,22 @@ double getTotalMemory() {
 
   int length = lastIndex - firstIndex + 1;
 
-  char* totalMemory = (char*)calloc(length + 1, 1);
-  if (totalMemory == NULL) {
+  char* stringAsMemory = (char*)calloc(length + 1, 1);
+  if (stringAsMemory == NULL) {
     return -1;
-  } 
+  }
   
-  strncpy(totalMemory, &buffer[firstIndex], length);
+  strncpy(stringAsMemory, &buffer[firstIndex], length);
       
-  return (atof(totalMemory) * 1024 / (1024 * 1024)) ;
+  double totalMemory = (atof(stringAsMemory) / 1024);
+
+  free(stringAsMemory);
+  
+  return totalMemory;
 }
 
-double getAvailableMemory() {
+/* Gets the available memory on the system by reading from /proc/meminfo and searching for "MemAvailable" */
+double getAvailableMemory(void) {
   FILE* fp;
   const char path[] = "/proc/meminfo";
   fp = fopen(path, "r");
@@ -170,22 +190,17 @@ double getAvailableMemory() {
 
   fclose(fp);
   
-  double usedMemory = ((double)operand * 1024) / (1024 * 1024); 
+  double usedMemory = ((double)operand  / 1024); 
 
   return usedMemory;
 }
 
-void displayImage() {
-  /* convert pixels into sixel format and write it to output context */
-SIXELAPI SIXELSTATUS
-sixel_encode(
-    unsigned char  /* in */ *pixels,     /* pixel bytes */
-    int            /* in */  width,      /* image width */
-    int            /* in */  height,     /* image height */
-    int            /* in */  depth,      /* color depth: now unused */
-    sixel_dither_t /* in */ *dither,     /* dither context */
-    sixel_output_t /* in */ *context);   /* output context */
-}
+// void displayImage() {
+//   char path[] = "~/Pictures/picture.jpg";
+//   FILE *fp = fopen(path, "rb");
+  
+//   base64_encode(path, , size_t *out_len)
+// }
 
 int main(void) {
   char* username = getUser();
@@ -208,4 +223,4 @@ int main(void) {
   printf("memory: %2.lf MiB / %2.lf MiB\n", usedMemory, totalMemory);
   
   return 0;
-};
+}

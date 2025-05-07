@@ -10,6 +10,7 @@ pkgs.mkShell {
     pkgs.binutils
     pkgs.gnumake
     pkgs.pkg-config
+    pkgs.valgrind
 
     # Add libraries your project uses here:
     pkgs.libsixel
